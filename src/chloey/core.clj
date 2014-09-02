@@ -18,7 +18,7 @@
   (str "PONG :" server))
 
 (defn cmd-privmsg [msg]
-  "TODO"
+  ; TODO
   "")
 
 (defn read [conn]
@@ -35,7 +35,7 @@
       (.flush))))
 
 (defn reply [conn msg]
-  "TODO: reply privmsg"
+  ; TODO: reply privmsg
   (cond
    (re-find #"^PING" msg)
    (go (write conn
