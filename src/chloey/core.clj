@@ -64,8 +64,8 @@
       ; set up csp channel
       (let [ch (chan)]
         (go (while true
-              (>!! ch (read conn))))
+              (>! ch (read conn))))
         (go (while true
-              (reply conn (<!! ch))))
+              (reply conn (<! ch))))
         ; TODO: (close! ch) if 'q' otherwise send privmsg
         (prn (read-line))))))
