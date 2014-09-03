@@ -1,7 +1,9 @@
 (ns chloey.core
   (:import (java.net Socket)
            (java.io PrintWriter BufferedReader InputStreamReader))
-  (:require [clojure.core.async :as async :refer :all]))
+  (:require [clojure.java.io :as io]
+            [clojure.edn :as edn]
+            [clojure.core.async :as async :refer :all]))
 
 (def suffix "\r")
 
@@ -24,8 +26,9 @@
 (defn read [conn]
   (let [reader (:reader @conn)
         msg (.readLine reader)]
-    (prn (str "reading: " msg))
-    msg))
+    (do
+      (prn (str "reading: " msg))
+      msg)))
 
 (defn write [conn msg]
   (do
@@ -42,9 +45,10 @@
               (cmd-pong (apply str (rest (re-find #":.*" msg))))))))
 
 (defn login [conn nick channel]
-  (write conn (cmd-nick nick))
-  (write conn (cmd-user nick))
-  (write conn (cmd-join channel)))
+  (do
+    (write conn (cmd-nick nick))
+    (write conn (cmd-user nick))
+    (write conn (cmd-join channel))))
 
 (defn connect [server port]
   (let [socket (Socket. server port)
@@ -53,14 +57,18 @@
     (ref {:reader reader
           :writer writer})))
 
+(defn read-file [filename]
+  ; read edn file
+  (->> filename
+       io/resource
+       slurp
+       edn/read-string))
+
 (defn -main []
-  (let [server "chat.freenode.net"
-        port 8002
-        nick "chloey"
-        channel "#microamp"]
-    (let [conn (connect server port)]
+  (let [conn-info (read-file "conn-info.edn")]
+    (let [conn (connect (:server conn-info) (:port conn-info))]
       ; log in and join channel
-      (login conn nick channel)
+      (login conn (:nick conn-info) (:channel conn-info))
       ; set up csp channel
       (let [ch (chan)]
         (go (while true
