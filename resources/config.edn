@@ -1,0 +1,6 @@
+{:conn-info {:server "chat.freenode.net"
+             :port 8002
+             :nick "chloey"
+             :channel "#microamp"}
+ :channels 10
+ :quit-msg "farewell"}

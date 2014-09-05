@@ -3,7 +3,7 @@
            (java.io PrintWriter BufferedReader InputStreamReader))
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
-            [clojure.core.async :as async :refer :all]))
+            [clojure.core.async :as async :refer [chan go >! <! close!]]))
 
 (def suffix "\r")
 
@@ -18,6 +18,10 @@
 
 (defn cmd-pong [server]
   (str "PONG :" server))
+
+(defn cmd-quit [msg]
+  ; TODO: display quit message properly
+  (str "QUIT :" msg))
 
 (defn cmd-privmsg [msg]
   ; TODO
@@ -41,8 +45,8 @@
   ; TODO: reply privmsg
   (cond
    (re-find #"^PING" msg)
-   (go (write conn
-              (cmd-pong (apply str (rest (re-find #":.*" msg))))))))
+   (write conn
+          (cmd-pong (apply str (rest (re-find #":.*" msg)))))))
 
 (defn login [conn nick channel]
   (do
@@ -64,16 +68,31 @@
        slurp
        edn/read-string))
 
+(defn trim-lower [s]
+  ; trim string and convert it to lower-case
+  (-> s
+      clojure.string/trim
+      .toLowerCase))
+
 (defn -main []
-  (let [conn-info (read-file "conn-info.edn")]
-    (let [conn (connect (:server conn-info) (:port conn-info))]
-      ; log in and join channel
-      (login conn (:nick conn-info) (:channel conn-info))
-      ; set up csp channel
-      (let [ch (chan)]
-        (go (while true
-              (>! ch (read conn))))
-        (go (while true
-              (reply conn (<! ch))))
-        ; TODO: (close! ch) if 'q' otherwise send privmsg
-        (prn (read-line))))))
+  (let [cfg (read-file "config.edn")
+        conn (connect (get-in cfg [:conn-info :server])
+                      (get-in cfg [:conn-info :port]))]
+    ; log in and join channel
+    (login conn
+           (get-in cfg [:conn-info :nick])
+           (get-in cfg [:conn-info :channel]))
+    ; set up csp channel(s)
+    (let [ch (chan)]
+      (go (while true
+            (>! ch (read conn))))
+      (go (while true
+            (reply conn (<! ch))))
+      ; 'q' to quit
+      (loop []
+        (let [input (trim-lower (read-line))]
+          (if (= input "q")
+            (do
+              (write conn (cmd-quit (:quit-msg cfg)))
+              (close! ch))
+            (recur)))))))
