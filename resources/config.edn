@@ -1,6 +1,4 @@
-{:conn-info {:server "chat.freenode.net"
-             :port 8002
+{:conn-info {:server "localhost"
+             :port 6667
              :nick "chloey"
-             :channel "#microamp"}
- :channels 10
- :quit-msg "farewell"}
+             :channel "#microamp"}}

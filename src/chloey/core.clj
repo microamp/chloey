@@ -3,7 +3,7 @@
            (java.io PrintWriter BufferedReader InputStreamReader))
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
-            [clojure.core.async :as async :refer [chan go >! <! close!]]))
+            [clojure.core.async :as async :refer [chan go >!! <!! close!]]))
 
 (def suffix "\r")
 
@@ -19,40 +19,55 @@
 (defn cmd-pong [server]
   (str "PONG :" server))
 
-(defn cmd-quit [msg]
-  ; TODO: display quit message properly
-  (str "QUIT :" msg))
+(defn cmd-quit []
+  (str "QUIT :\"bye world\""))
 
-(defn cmd-privmsg [msg]
-  ; TODO
-  "")
+(defn cmd-privmsg [tgt msg]
+  (str "PRIVMSG " tgt " :" msg))
 
-(defn read [conn]
+(defn read-buff [conn]
   (let [reader (:reader @conn)
         msg (.readLine reader)]
     (do
       (prn (str "reading: " msg))
       msg)))
 
-(defn write [conn msg]
-  (do
-    (prn (str "writing: " msg))
-    (doto (:writer @conn)
-      (.println (str msg suffix))
-      (.flush))))
+(defn write-buff [conn msg]
+  (if (not (nil? msg))
+    (do
+      (prn (str "writing: " msg))
+      (doto (:writer @conn)
+        (.println (str msg suffix))
+        (.flush)))))
+
+(defn tokenise [s]
+  (clojure.string/split s #"\s"))
+
+(defn untokenise [tokens]
+  (apply str (interpose " " tokens)))
+
+(defn rm-colon [s]
+  (apply str (rest (clojure.string/split s #":"))))
+
+(defn pong [[_ _ server]]
+  (cmd-pong (rm-colon server)))
+
+(defn privmsg [[src cmd tgt & msg]]
+  (if (and (= cmd "PRIVMSG")
+           (.startsWith tgt "#"))
+    (cmd-privmsg tgt
+                 (rm-colon (untokenise msg)))))
 
 (defn reply [conn msg]
-  ; TODO: reply privmsg
-  (cond
-   (re-find #"^PING" msg)
-   (write conn
-          (cmd-pong (apply str (rest (re-find #":.*" msg)))))))
-
-(defn login [conn nick channel]
-  (do
-    (write conn (cmd-nick nick))
-    (write conn (cmd-user nick))
-    (write conn (cmd-join channel))))
+  (let [tokens (tokenise msg)]
+    (write-buff conn
+                (cond
+                 (= (first tokens) "PING")
+                 (pong (cons "" tokens))
+                 (= (second tokens) "PING")
+                 (pong tokens)
+                 (= (second tokens) "PRIVMSG")
+                 (privmsg tokens)))))
 
 (defn connect [server port]
   (let [socket (Socket. server port)
@@ -61,15 +76,21 @@
     (ref {:reader reader
           :writer writer})))
 
+(defn login [conn nick channel]
+  (doseq [cmd [(cmd-nick nick)
+               (cmd-user nick)
+               (cmd-join channel)]]
+    (write-buff conn cmd)))
+
 (defn read-file [filename]
-  ; read edn file
-  (->> filename
-       io/resource
-       slurp
-       edn/read-string))
+  ;; read edn file
+  (-> filename
+      io/resource
+      slurp
+      edn/read-string))
 
 (defn trim-lower [s]
-  ; trim string and convert it to lower-case
+  ;; trim string and convert it to lower-case
   (-> s
       clojure.string/trim
       .toLowerCase))
@@ -78,21 +99,25 @@
   (let [cfg (read-file "config.edn")
         conn (connect (get-in cfg [:conn-info :server])
                       (get-in cfg [:conn-info :port]))]
-    ; log in and join channel
+    ;; log in and join channel
     (login conn
            (get-in cfg [:conn-info :nick])
            (get-in cfg [:conn-info :channel]))
-    ; set up csp channel(s)
+    ;; set up csp channel(s)
     (let [ch (chan)]
+      ; producers
       (go (while true
-            (>! ch (read conn))))
+            (let [msg (read-buff conn)]
+              (if (not (nil? msg))
+                (>!! ch msg)))))
+      ;; consumers
       (go (while true
-            (reply conn (<! ch))))
-      ; 'q' to quit
+            (reply conn (<!! ch))))
+      ;; 'q' to quit
       (loop []
         (let [input (trim-lower (read-line))]
           (if (= input "q")
             (do
-              (write conn (cmd-quit (:quit-msg cfg)))
+              (write-buff conn (cmd-quit))
               (close! ch))
             (recur)))))))
