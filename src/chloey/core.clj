@@ -35,7 +35,6 @@
          ((complement nil?) (re-find #"\s.+\sis\s.+" msg)))))
 
 (defn question? [[_ _ _ & msgs]]
-  (.endsWith (common/untokenise msgs) "?")
   (let [msg (common/untokenise msgs)]
     (.endsWith msg "?")))
 
@@ -70,7 +69,11 @@
                            (apply str (-> msg rest butlast)))]
       (if (not (nil? doc))
         (do
-          (cmd/privmsg tgt (:factoid doc)))))))
+          (cmd/privmsg tgt (str (:reporter doc)
+                                " said "
+                                (:subject doc)
+                                " is "
+                                (:factoid doc))))))))
 
 (defn reply [irc-conn msg]
   (let [tokens (common/tokenise msg)]

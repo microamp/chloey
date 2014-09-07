@@ -24,8 +24,8 @@ Format: ``<subject>?``
 
 e.g.
 ```
-[21:37] <microamp> everything?
-[21:37] <chloey> awesome
+[21:53] <microamp> everything?
+[21:53] <chloey> microamp said everything is awesome
 ```
 
 ## License
