@@ -1,5 +1,8 @@
-{:conn-info {:server "localhost"
-             :port 6667
-             :nick "chloey"
-             :channel "#microamp"}
- :consumers 5}
+{:irc {:host "localhost"
+       :port 6667
+       :nick "chloey"
+       :channel "#microamp"}
+ :db {:host "localhost"
+      :port 27017
+      :db "chloey"}
+ :csp {:consumers 5}}

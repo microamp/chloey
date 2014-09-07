@@ -6,8 +6,10 @@
 (defn untokenise [tokens]
   (apply str (interpose " " tokens)))
 
-(defn rm-colon [s]
-  (apply str (rest (clojure.string/split s #":"))))
+(defn rm-prefix [s prefix]
+  (if (.startsWith s prefix)
+    (apply str (drop (count prefix) s))
+    s))
 
 (defn trim-lower [s]
   (-> s

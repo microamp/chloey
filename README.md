@@ -6,6 +6,28 @@ A minimal IRC bot in Clojure.
 
 ``lein run``
 
+## Simple Factoid Storage/Retrieval
+
+### How to store a factoid
+
+Format: ``chloey: <subject> is <factoid>``
+
+e.g.
+
+```
+[21:37] <microamp> chloey: everything is awesome
+```
+
+### How to retrieve a factoid
+
+Format: ``<subject>?``
+
+e.g.
+```
+[21:37] <microamp> everything?
+[21:37] <chloey> awesome
+```
+
 ## License
 
 Copyright © 2014 James Nah
