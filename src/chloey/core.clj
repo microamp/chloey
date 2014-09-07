@@ -3,7 +3,7 @@
            (java.io PrintWriter BufferedReader InputStreamReader))
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
-            [clojure.core.async :as async :refer [chan go >!! <!! close!]]))
+            [clojure.core.async :as async :refer [chan go >! <! close!]]))
 
 (def suffix "\r")
 
@@ -103,16 +103,21 @@
     (login conn
            (get-in cfg [:conn-info :nick])
            (get-in cfg [:conn-info :channel]))
-    ;; set up csp channel(s)
+    ;; set up csp channel
     (let [ch (chan)]
-      ; producers
-      (go (while true
+      ;; (single) producer
+      (go (loop []
             (let [msg (read-buff conn)]
               (if (not (nil? msg))
-                (>!! ch msg)))))
-      ;; consumers
-      (go (while true
-            (reply conn (<!! ch))))
+                (>! ch msg)))
+            (recur)))
+      ;; (multiple) consumers
+      (doseq [_ (range (:consumers cfg))]
+        (go (loop []
+              (let [msg (<! ch)]
+                (if (not (nil? msg))
+                  (reply conn msg)))
+              (recur))))
       ;; 'q' to quit
       (loop []
         (let [input (trim-lower (read-line))]

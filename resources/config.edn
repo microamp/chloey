@@ -1,4 +1,5 @@
 {:conn-info {:server "localhost"
              :port 6667
              :nick "chloey"
-             :channel "#microamp"}}
+             :channel "#microamp"}
+ :consumers 5}
