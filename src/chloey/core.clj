@@ -62,9 +62,9 @@
                (not (empty? factoid)))
         (do
           (io/upsert-doc (get-db db-conn)
-                         {:reporter (get-nick src)
-                          :subject (get-subject msgs)
-                          :factoid (get-factoid msgs)})
+                         {:reporter reporter
+                          :subject subject
+                          :factoid factoid})
           nil)))))
 
 (defn retrieve-factoid [[_ cmd tgt & msgs]]
