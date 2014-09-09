@@ -2,103 +2,104 @@
   (:require [clojure.core.async :as async :refer [chan go >! <! close!]]
             [chloey.cmd :as cmd]
             [chloey.common :as common]
-            [chloey.irc :as irc]
-            [chloey.io :as io]))
+            [chloey.io :as io]
+            [chloey.irc :as irc]))
 
-(def suffix "\r")
-
-(def cfg (io/read-file "config.edn"))
-
+(def cfg-file "config.edn")
+(def cfg (io/read-file cfg-file))
 (def db-conn (io/connect-db (:db cfg)))
-
-(defn read-buff [irc-conn]
-  (let [reader (:reader @irc-conn)
-        msg (.readLine reader)]
-    (do
-      (prn (str "reading: " msg))
-      msg)))
-
-(defn write-buff [irc-conn msg]
-  (if (not (nil? msg))
-    (do
-      (prn (str "writing: " msg))
-      (doto (:writer @irc-conn)
-        (.println (str msg suffix))
-        (.flush)))))
 
 (defn get-db [conn]
   (io/get-db db-conn (get-in cfg [:db :db])))
 
+(defn ping? [[cmd]]
+  (= cmd "PING"))
+
+(defn privmsg? [[_ cmd]]
+  (= cmd "PRIVMSG"))
+
+(defn colon-separated [msg]
+  (clojure.string/split msg #":"))
+
+(defn is-separated [msg]
+  (clojure.string/split msg #"\sis\s"))
+
+(defn build-msg [msgs]
+  (apply str (interpose " " msgs)))
+
 (defn factoid? [[_ _ _ & msgs]]
-  (let [msg (common/untokenise msgs)]
-    (and (.startsWith msg (str ":" (get-in cfg [:irc :nick]) ": "))
-         ((complement nil?) (re-find #"\s.+\sis\s.+" msg)))))
+  (and (= (first msgs)
+          (str ":" (get-in cfg [:irc :nick]) ":"))
+       (some #(= % "is") msgs)))
 
 (defn question? [[_ _ _ & msgs]]
-  (let [msg (common/untokenise msgs)]
-    (.endsWith msg "?")))
+  (.endsWith (last msgs)
+             "?"))
 
 (defn get-nick [src]
-  ;; :microamp!~user@localhost.localdomain -> microamp
-  (common/rm-prefix (first (clojure.string/split src #"!~"))
-                    ":"))
+  ;; e.g. :microamp!~user@localhost.localdomainN -> microamp
+  (-> src
+      (clojure.string/split #":")
+      second
+      (clojure.string/split #"!~")
+      first))
 
-(defn pong [[_ _ server]]
-  (cmd/pong (common/rm-prefix server ":")))
+(defn get-subject [msgs]
+  (apply str (interpose " " (take-while #(not= % "is") (rest msgs)))))
 
-(defn store-factoid [[src cmd tgt & msgs]]
-  (if (and (= cmd "PRIVMSG")
-           (.startsWith tgt "#"))
-    (let [msg (common/untokenise msgs)
-          tokens (clojure.string/split msg #"\sis\s")
-          subject (common/rm-prefix (first tokens)
-                                    (str ":" (get-in cfg [:irc :nick]) ": "))
-          factoid (apply str (interpose " is " (rest tokens)))]
-      (do
-        (io/upsert-doc (get-db db-conn)
-                       {:reporter (get-nick src)
-                        :subject subject
-                        :factoid factoid})
-        nil))))
+(defn get-factoid [msgs]
+  (apply str (interpose " " (rest (drop-while #(not= % "is") msgs)))))
+
+(defn pong [[_ server]]
+  (cmd/pong (second (colon-separated server))))
+
+(defn store-factoid [[src _ tgt & msgs]]
+  (if (.startsWith tgt "#")
+    (let [reporter (get-nick src)
+          subject (get-subject msgs)
+          factoid (get-factoid msgs)]
+      (if (and (not (empty? subject))
+               (not (empty? factoid)))
+        (do
+          (io/upsert-doc (get-db db-conn)
+                         {:reporter (get-nick src)
+                          :subject (get-subject msgs)
+                          :factoid (get-factoid msgs)})
+          nil)))))
 
 (defn retrieve-factoid [[_ cmd tgt & msgs]]
-  (if (and (= cmd "PRIVMSG")
-           (.startsWith tgt "#"))
-    (let [msg (common/untokenise msgs)
+  (if (.startsWith tgt "#")
+    (let [msg (build-msg msgs)
           doc (io/read-doc (get-db db-conn)
                            (apply str (-> msg rest butlast)))]
       (if (not (nil? doc))
-        (do
-          (cmd/privmsg tgt (str (:reporter doc)
-                                " said "
-                                (:subject doc)
-                                " is "
-                                (:factoid doc))))))))
+        (cmd/privmsg tgt (str (:reporter doc)
+                              " said "
+                              (:subject doc)
+                              " is "
+                              (:factoid doc)))))))
 
 (defn reply [irc-conn msg]
-  (let [tokens (common/tokenise msg)]
-    (write-buff irc-conn
-                (cond
-                 ;; ping
-                 (= (first tokens) "PING")
-                 (pong (cons "" tokens))
-                 ;; ping
-                 (= (second tokens) "PING")
-                 (pong tokens)
-                 ;; store factoid
-                 (and (= (second tokens) "PRIVMSG")
-                      (factoid? tokens))
-                 (store-factoid tokens)
-                 ;; retrieve factoid
-                 (and (= (second tokens) "PRIVMSG")
-                      (question? tokens))
-                 (retrieve-factoid tokens)))))
+  (let [tokens (clojure.string/split msg #"\s")]
+    (irc/write irc-conn
+               (cond
+                ;; ping
+                (ping? tokens)
+                (pong tokens)
+                ;; store factoid
+                (and (privmsg? tokens)
+                     (factoid? tokens))
+                (store-factoid tokens)
+                ;; retrieve factoid
+                (and (privmsg? tokens)
+                     (question? tokens))
+                (retrieve-factoid tokens)))))
 
 (defn login [irc-conn nick channel]
   (doseq [cmd [(cmd/nick nick)
                (cmd/user nick)
                (cmd/join channel)]]
-    (write-buff irc-conn cmd)))
+    (irc/write irc-conn cmd)))
 
 (defn -main []
   (let [irc-conn (irc/connect (get-in cfg [:irc :host])
@@ -111,7 +112,7 @@
     (let [ch (chan)]
       ;; (single) producer
       (go (loop []
-            (let [msg (read-buff irc-conn)]
+            (let [msg (irc/read irc-conn)]
               (if (not (nil? msg))
                 (>! ch msg)))
             (recur)))
@@ -127,7 +128,7 @@
         (let [input (common/trim-lower (read-line))]
           (if (= input "q")
             (do
-              (write-buff irc-conn (cmd/quit))
+              (irc/write irc-conn (cmd/quit))
               (close! ch)
               (io/disconnect-db db-conn))
             (recur)))))))
