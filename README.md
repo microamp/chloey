@@ -1,6 +1,6 @@
 # chloey
 
-A minimal IRC bot in Clojure.
+Infobot clone in Clojure
 
 ## Usage
 
@@ -26,6 +26,26 @@ e.g.
 ```
 [21:53] <microamp> everything?
 [21:53] <chloey> microamp said everything is awesome
+```
+
+### How to store a reply
+
+Format: ``chloey: <subject> is <reply><factoid>``
+
+e.g.
+
+```
+[21:39] <microamp> chloey: dumb bot is <reply>stupid human
+```
+
+### How to retrieve a reply
+
+Format: ``subject``
+
+e.g.
+```
+[21:39] <microamp> dumb bot
+[21:39] <chloey> stupid human
 ```
 
 ## License

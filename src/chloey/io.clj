@@ -25,16 +25,19 @@
 
 (defn upsert-doc [db {reporter :reporter
                       subject :subject
-                      factoid :factoid}]
+                      factoid :factoid
+                      type :type}]
   (mc/update db
              coll-factoid
              {:subject subject}
              {:reporter reporter
               :subject subject
-              :factoid factoid}
+              :factoid factoid
+              :type type}
              {:upsert true}))
 
-(defn read-doc [db subject]
+(defn read-doc [db subject type]
   (mc/find-one-as-map db
                       coll-factoid
-                      {:subject subject}))
+                      {:subject subject
+                       :type type}))

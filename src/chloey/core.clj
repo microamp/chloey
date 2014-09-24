@@ -21,57 +21,99 @@
 (defn colon-separated [msg]
   (clojure.string/split msg #":"))
 
-(defn is-separated [msg]
-  (clojure.string/split msg #"\sis\s"))
+(defn pong [[_ server]]
+  (cmd/pong (second (colon-separated server))))
 
 (defn build-msg [msgs]
   (apply str (interpose " " msgs)))
 
+(defn reply? [[_ _ _ & msgs]]
+  (and (= (first msgs)
+          (str ":" (get-in cfg [:irc :nick]) ":"))
+       ((complement nil?) (re-find #".+\sis\s<reply>.+"
+                                   (build-msg (rest msgs))))))
+
 (defn factoid? [[_ _ _ & msgs]]
   (and (= (first msgs)
           (str ":" (get-in cfg [:irc :nick]) ":"))
-       (some #(= % "is") msgs)))
+       ((complement nil?) (re-find #".+\sis\s.+"
+                                   (build-msg (rest msgs))))))
 
 (defn question? [[_ _ _ & msgs]]
-  (.endsWith (last msgs)
-             "?"))
+  (.endsWith (last msgs) "?"))
 
 (defn get-nick [src]
-  ;; e.g. :microamp!~user@localhost.localdomainN -> microamp
+  ;; e.g. :microamp!~user@localhost.localdomain -> microamp
   (-> src
       (clojure.string/split #":")
       second
       (clojure.string/split #"!~")
       first))
 
-(defn get-subject [msgs]
-  (apply str (interpose " " (take-while #(not= % "is") (rest msgs)))))
+(defn get-reply-pairs [msgs]
+  (let [split (clojure.string/split (build-msg (rest msgs))
+                                    #"\sis\s<reply>")]
+    [(first split) (build-msg (rest split))]))
 
-(defn get-factoid [msgs]
-  (apply str (interpose " " (rest (drop-while #(not= % "is") msgs)))))
+(defn get-factoid-pairs [msgs reply]
+  (let [split (if reply
+                (clojure.string/split (build-msg (rest msgs))
+                                      #"\sis\s<reply>")
+                (clojure.string/split (build-msg (rest msgs))
+                                      #"\sis\s"))]
+    [(first split) (build-msg (rest split))]))
 
-(defn pong [[_ server]]
-  (cmd/pong (second (colon-separated server))))
-
-(defn store-factoid [[src _ tgt & msgs]]
+(defn store-reply [[src _ tgt & msgs]]
   (if (.startsWith tgt "#")
     (let [reporter (get-nick src)
-          subject (get-subject msgs)
-          factoid (get-factoid msgs)]
+          factoid-pairs (get-factoid-pairs msgs true)
+          subject (get factoid-pairs 0)
+          factoid (get factoid-pairs 1)
+          type "reply"]
       (if (and (not (empty? subject))
                (not (empty? factoid)))
         (do
           (io/upsert-doc (get-db db-conn)
                          {:reporter reporter
                           :subject subject
-                          :factoid factoid})
+                          :factoid factoid
+                          :type type})
           nil)))))
+
+(defn store-factoid [[src _ tgt & msgs]]
+  (if (.startsWith tgt "#")
+    (let [reporter (get-nick src)
+          factoid-pairs (get-factoid-pairs msgs false)
+          subject (get factoid-pairs 0)
+          factoid (get factoid-pairs 1)
+          type "factoid"]
+      (if (and (not (empty? subject))
+               (not (empty? factoid)))
+        (do
+          (io/upsert-doc (get-db db-conn)
+                         {:reporter reporter
+                          :subject subject
+                          :factoid factoid
+                          :type type})
+          nil)))))
+
+(defn retrieve-reply [[_ cmd tgt & msgs]]
+  (if (.startsWith tgt "#")
+    (let [msg (build-msg msgs)
+          type "reply"
+          doc (io/read-doc (get-db db-conn)
+                           (apply str (rest msg))
+                           type)]
+      (if (not (nil? doc))
+        (cmd/privmsg tgt (:factoid doc))))))
 
 (defn retrieve-factoid [[_ cmd tgt & msgs]]
   (if (.startsWith tgt "#")
     (let [msg (build-msg msgs)
+          type "factoid"
           doc (io/read-doc (get-db db-conn)
-                           (apply str (-> msg rest butlast)))]
+                           (apply str (-> msg rest butlast))
+                           type)]
       (if (not (nil? doc))
         (cmd/privmsg tgt (str (:reporter doc)
                               " said "
@@ -80,16 +122,25 @@
                               (:factoid doc)))))))
 
 (defn reply [irc-conn msg]
-  (let [tokens (clojure.string/split msg #"\s")]
+  (let [tokens (filter (complement empty?)
+                       (clojure.string/split msg #"\s"))]
     (irc/write irc-conn
                (cond
                 ;; ping
                 (ping? tokens)
                 (pong tokens)
+                ;; store reply
+                (and (privmsg? tokens)
+                     (reply? tokens))
+                (store-reply tokens)
                 ;; store factoid
                 (and (privmsg? tokens)
                      (factoid? tokens))
                 (store-factoid tokens)
+                ;; retrieve reply
+                (and (privmsg? tokens)
+                     ((complement question?) tokens))
+                (retrieve-reply tokens)
                 ;; retrieve factoid
                 (and (privmsg? tokens)
                      (question? tokens))
