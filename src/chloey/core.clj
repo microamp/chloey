@@ -50,11 +50,6 @@
       (clojure.string/split #"!~")
       first))
 
-(defn get-reply-pairs [msgs]
-  (let [split (clojure.string/split (build-msg (rest msgs))
-                                    #"\sis\s<reply>")]
-    [(first split) (build-msg (rest split))]))
-
 (defn get-factoid-pairs [msgs reply]
   (let [split (if reply
                 (clojure.string/split (build-msg (rest msgs))
