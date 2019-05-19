@@ -58,70 +58,56 @@
                                       #"\sis\s"))]
     [(first split) (build-msg (rest split))]))
 
+(defn store [reporter subject factoid type]
+  (if (and (not (empty? subject))
+           (not (empty? factoid)))
+    (do
+      (io/upsert-doc (get-db db-conn)
+                     {:reporter reporter
+                      :subject subject
+                      :factoid factoid
+                      :type type})
+      nil)))
+
 (defn store-reply [[src _ tgt & msgs]]
   (if (.startsWith tgt "#")
-    (let [reporter (get-nick src)
-          factoid-pairs (get-factoid-pairs msgs true)
-          subject (get factoid-pairs 0)
-          factoid (get factoid-pairs 1)
+    (let [factoid-pairs (get-factoid-pairs msgs true)
           type "reply"]
-      (if (and (not (empty? subject))
-               (not (empty? factoid)))
-        (do
-          (io/upsert-doc (get-db db-conn)
-                         {:reporter reporter
-                          :subject subject
-                          :factoid factoid
-                          :type type})
-          nil)))))
+      (store (get-nick src) ;; reporter
+             (get factoid-pairs 0) ;; subject
+             (get factoid-pairs 1) ;; factoid
+             type))))
 
 (defn store-factoid [[src _ tgt & msgs]]
   (if (.startsWith tgt "#")
-    (let [reporter (get-nick src)
-          factoid-pairs (get-factoid-pairs msgs false)
-          subject (get factoid-pairs 0)
-          factoid (get factoid-pairs 1)
+    (let [factoid-pairs (get-factoid-pairs msgs false)
           type "factoid"]
-      (if (and (not (empty? subject))
-               (not (empty? factoid)))
-        (do
-          (io/upsert-doc (get-db db-conn)
-                         {:reporter reporter
-                          :subject subject
-                          :factoid factoid
-                          :type type})
-          nil)))))
+      (store (get-nick src) ;; reporter
+             (str (get factoid-pairs 0) "?") ;; subject
+             (get factoid-pairs 1) ;; factoid
+             type))))
 
-(defn retrieve-reply [[_ cmd tgt & msgs]]
+(defn retrieve [[_ cmd tgt & msgs]]
   (if (.startsWith tgt "#")
     (let [msg (build-msg msgs)
-          type "reply"
           doc (io/read-doc (get-db db-conn)
-                           (apply str (rest msg))
-                           type)]
+                           (apply str (rest msg)))]
       (if (not (nil? doc))
-        (cmd/privmsg tgt (:factoid doc))))))
-
-(defn retrieve-factoid [[_ cmd tgt & msgs]]
-  (if (.startsWith tgt "#")
-    (let [msg (build-msg msgs)
-          type "factoid"
-          doc (io/read-doc (get-db db-conn)
-                           (apply str (-> msg rest butlast))
-                           type)]
-      (if (not (nil? doc))
-        (cmd/privmsg tgt (str (:reporter doc)
-                              " said "
-                              (:subject doc)
-                              " is "
-                              (:factoid doc)))))))
+        (cmd/privmsg tgt
+                     (if (= (:type doc) "reply")
+                       (:factoid doc)
+                       (str (:reporter doc)
+                            " said "
+                            (apply str (butlast (:subject doc)))
+                            " is "
+                            (:factoid doc))))))))
 
 (defn reply [irc-conn msg]
   (let [tokens (filter (complement empty?)
                        (clojure.string/split msg #"\s"))]
     (irc/write irc-conn
                (cond
-                ;; ping
+                ;; pong
                 (ping? tokens)
                 (pong tokens)
                 ;; store reply
@@ -132,14 +118,9 @@
                 (and (privmsg? tokens)
                      (factoid? tokens))
                 (store-factoid tokens)
-                ;; retrieve reply
-                (and (privmsg? tokens)
-                     ((complement question?) tokens))
-                (retrieve-reply tokens)
-                ;; retrieve factoid
-                (and (privmsg? tokens)
-                     (question? tokens))
-                (retrieve-factoid tokens)))))
+                ;; retrieve reply/factoid
+                (privmsg? tokens)
+                (retrieve tokens)))))
 
 (defn login [irc-conn nick channel]
   (doseq [cmd [(cmd/nick nick)
@@ -175,6 +156,6 @@
           (if (= input "q")
             (do
               (irc/write irc-conn (cmd/quit))
-              (close! ch)
+              (close! ch) ;; close channel
               (io/disconnect-db db-conn))
             (recur)))))))

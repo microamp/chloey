@@ -36,8 +36,7 @@
               :type type}
              {:upsert true}))
 
-(defn read-doc [db subject type]
+(defn read-doc [db subject]
   (mc/find-one-as-map db
                       coll-factoid
-                      {:subject subject
-                       :type type}))
+                      {:subject subject}))
